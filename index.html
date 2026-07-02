@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Greg Egan stories</title>
+  <style>
+    body { max-width: 46rem; margin: 3rem auto; padding: 0 1rem; font: 18px/1.5 system-ui, sans-serif; background: #faf7f0; color: #211b16; }
+    h1 { line-height: 1.1; }
+    section { margin-top: 2rem; }
+    ul { list-style: none; padding: 0; }
+    li { margin: .45rem 0; }
+    button { width: 100%; padding: .7rem .9rem; border: 1px solid #d8cfc2; border-radius: .7rem; background: #fffdf8; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+    button:hover, button:focus { border-color: #7b4f2c; outline: none; }
+    #status { min-height: 1.5em; color: #6d4d35; }
+  </style>
+</head>
+<body>
+  <h1>Short stories</h1>
+  <p>Click a title to copy the full story text.</p>
+  <p id="status">Loading…</p>
+  <main id="app"></main>
+
+  <script>
+    const files = ["Axiomatic.txt", "Luminous.txt"];
+    const expected = { "Axiomatic.txt": 18, "Luminous.txt": 10 }; // ponytail: cheap parser guard for these two bundled books.
+    const status = document.querySelector("#status");
+    const app = document.querySelector("#app");
+
+    const norm = s => s.trim()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase().replace(/[’']/g, "'")
+      .replace(/[^a-z0-9']+/g, " ").trim();
+
+    const isIndexTitle = s => s && s === s.toLocaleUpperCase("it-IT") && /[A-ZÀ-ÖØ-Þ]/u.test(s);
+
+    function parseStories(text) {
+      const lines = text.split(/\r?\n/);
+      const toc = lines.findIndex(line => norm(line) === "indice");
+      if (toc < 0) throw new Error("No Indice found");
+
+      const titles = [];
+      for (let i = toc + 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        if (!isIndexTitle(line)) break;
+        titles.push(line);
+      }
+
+      let cursor = lines.findIndex((line, i) => i > toc && norm(line) === norm(titles.at(-1))) + 1;
+      const starts = titles.map(title => {
+        const start = lines.findIndex((line, i) => i >= cursor && norm(line) === norm(title));
+        if (start < 0) throw new Error(`Missing story: ${title}`);
+        cursor = start + 1;
+        return start;
+      });
+
+      return starts.map((start, i) => ({
+        title: lines[start].trim(),
+        text: lines.slice(start, starts[i + 1] ?? lines.length).join("\n").trim()
+      }));
+    }
+
+    async function copy(text, button) {
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const box = document.createElement("textarea");
+          box.value = text;
+          box.style.position = "fixed";
+          box.style.left = "-9999px";
+          document.body.append(box);
+          box.select();
+          const ok = document.execCommand("copy");
+          box.remove();
+          if (!ok) throw new Error("Copy failed");
+        }
+        status.textContent = `Copied “${button.textContent}”`;
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    }
+
+    async function load() {
+      for (const file of files) {
+        const text = await fetch(file).then(response => {
+          if (!response.ok) throw new Error(`Could not load ${file}`);
+          return response.text();
+        });
+        const stories = parseStories(text);
+        if (stories.length !== expected[file]) throw new Error(`${file}: expected ${expected[file]} stories, found ${stories.length}`);
+
+        const section = document.createElement("section");
+        section.innerHTML = `<h2>${file.replace(".txt", "")}</h2>`;
+        const list = document.createElement("ul");
+        stories.forEach(story => {
+          const item = document.createElement("li");
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = story.title;
+          button.addEventListener("click", () => copy(story.text, button));
+          item.append(button);
+          list.append(item);
+        });
+        section.append(list);
+        app.append(section);
+      }
+      status.textContent = "Ready.";
+    }
+
+    load().catch(error => status.textContent = error.message);
+  </script>
+</body>
+</html>
